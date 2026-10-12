@@ -56,12 +56,22 @@ fn count_occurrences(data: &[u8], needle: &[u8]) -> usize {
 /// to launch. A running executable is locked on Windows, so the owning process is
 /// killed and the write retried only if the first attempt actually fails.
 fn write_binary(bin_path: &Path, data: &[u8]) -> Result<(), String> {
-    if write_atomic(bin_path, data).is_ok() {
-        return Ok(());
+    let res = if write_atomic(bin_path, data).is_ok() {
+        Ok(())
+    } else {
+        kill_holder(bin_path);
+        thread::sleep(Duration::from_millis(500));
+        write_atomic(bin_path, data).map_err(|e| e.to_string())
+    };
+    #[cfg(target_os = "macos")]
+    if res.is_ok() {
+        let _ = Command::new("codesign")
+            .args(["--force", "--deep", "--sign", "-", bin_path.to_str().unwrap_or_default()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
-    kill_holder(bin_path);
-    thread::sleep(Duration::from_millis(500));
-    write_atomic(bin_path, data).map_err(|e| e.to_string())
+    res
 }
 
 /// Kills whatever process holds `bin_path` open so the write can be retried.
@@ -371,9 +381,13 @@ pub fn repatch_if_needed(bin_path: &Path) -> RepatchOutcome {
 /// `language_server*` file - whatever the exact suffix, the signature scan then
 /// decides whether it is really a target.
 pub fn binary_targets(inst: &Path) -> Vec<PathBuf> {
-    let resources_bin = inst.join("resources").join("bin");
-    let ext_bin = inst
-        .join("resources")
+    let resources = if inst.join("Contents").join("Resources").exists() {
+        inst.join("Contents").join("Resources")
+    } else {
+        inst.join("resources")
+    };
+    let resources_bin = resources.join("bin");
+    let ext_bin = resources
         .join("app")
         .join("extensions")
         .join("antigravity")

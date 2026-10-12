@@ -82,7 +82,11 @@ fn is_install_root(path: &Path) -> bool {
         return false;
     }
 
-    let resources = path.join("resources");
+    let resources = if path.join("Contents").join("Resources").exists() {
+        path.join("Contents").join("Resources")
+    } else {
+        path.join("resources")
+    };
     if resources.exists() && resources.is_dir() {
         if resources.join("app.asar").exists()
             || resources.join("app").exists()
@@ -108,6 +112,8 @@ fn is_install_root(path: &Path) -> bool {
     if path.join("antigravity").is_file()
         || path.join("Antigravity").is_file()
         || path.join("antigravity-ide").is_file()
+        || path.join("Contents/MacOS/Antigravity").is_file()
+        || path.join("Contents/MacOS/Electron").is_file()
     {
         return true;
     }
@@ -213,21 +219,31 @@ fn standard_install_candidates() -> Vec<PathBuf> {
             v.push(PathBuf::from(base).join(name));
         }
     }
-    // Per-user installs (tarball / AppImage extraction / `agy` CLI).
+    // macOS standard application directories.
+    for app in [
+        "/Applications/Antigravity.app",
+        "/Applications/Antigravity IDE.app",
+        "/Applications/antigravity.app",
+    ] {
+        v.push(PathBuf::from(app));
+    }
+    // Per-user installs (tarball / AppImage extraction / macOS ~/Applications / `agy` CLI).
     if !home.is_empty() {
         let h = PathBuf::from(&home);
+        v.push(h.join("Applications/Antigravity.app"));
+        v.push(h.join("Applications/Antigravity IDE.app"));
         v.push(h.join(".local/share/Antigravity"));
         v.push(h.join(".local/share/Antigravity IDE"));
         v.push(h.join("Antigravity"));
         v.push(h.join("Antigravity IDE"));
-        // The `agy` CLI: measured at `~/.local/bin/agy` on a real install, so its
-        // bin dir is an install root in its own right (binary_targets scopes to
-        // `agy`/`language_server*`, so a shared bin dir patches only ours).
+        // The `agy` CLI: measured at `~/.local/bin/agy` or `~/.agy/bin/agy` or Homebrew.
         v.push(h.join(".local/bin"));
         v.push(h.join(".agy/bin"));
         v.push(h.join(".agy"));
         v.push(h.join(".local/share/agy/bin"));
     }
+    v.push(PathBuf::from("/opt/homebrew/bin"));
+    v.push(PathBuf::from("/usr/local/bin"));
     v
 }
 
@@ -399,7 +415,11 @@ pub fn process_install(install: &Path) -> Result<InstallOutcome, String> {
     let bin_summary = patch_all_binaries(install);
     let mut warnings: Vec<String> = Vec::new();
 
-    let resources = install.join("resources");
+    let resources = if install.join("Contents").join("Resources").exists() {
+        install.join("Contents").join("Resources")
+    } else {
+        install.join("resources")
+    };
     let app_dir = resources.join("app");
     let app_asar = resources.join("app.asar");
 
